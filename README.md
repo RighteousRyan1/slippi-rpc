@@ -3,7 +3,7 @@ Allows players of Slippi to run a console window that tells others what they're 
 
 # Build Manually
 
-You will have to install (https://nodejs.org/en)[NodeJS].
+You will have to install [NodeJS](https://nodejs.org/en).
 
 Then, run the following in the directory you install source to:
 
