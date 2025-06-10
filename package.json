@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@slippi/slippi-js": "^6.7.0",
+    "chokidar": "^4.0.3",
+    "discord-rpc": "^4.0.1",
+    "lodash": "^4.17.21"
+  },
+  "bin": "rpc.js"
+}
