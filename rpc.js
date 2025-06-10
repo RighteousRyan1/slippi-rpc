@@ -2,9 +2,10 @@ const fs = require("fs");
 const path = require("path");
 const { SlippiGame } = require("@slippi/slippi-js");
 const RPC = require("discord-rpc");
+const os = require('os');
 
-const now = new Date();
-const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+const startNow = new Date();
+const yearMonth = `${startNow.getFullYear()}-${String(startNow.getMonth() + 1).padStart(2, '0')}`;
 
 const characterIdToName = {
     0: "mario",
@@ -57,6 +58,44 @@ let currentGame = null;
 let currentReplayPath = null;
 const rpc = new RPC.Client({ transport: "ipc" });
 
+function getAppDataPath() {
+    const platform = process.platform;
+
+    if (platform === 'win32') {
+        return process.env.APPDATA;
+    } else if (platform === 'darwin') {
+        // macos: typically ~/Library/Application Support
+        return path.join(os.homedir(), 'Library', 'Application Support');
+    } else {
+        // linux/unix: typically ~/.config
+        return path.join(os.homedir(), '.config');
+    }
+}
+function getConnectCode() {
+    const slippiPath = path.join(
+        getAppDataPath(),
+        'Slippi Launcher',
+        'netplay',
+        'User',
+        'Slippi',
+        'user.json'
+    );
+
+    try {
+        const rawData = fs.readFileSync(slippiPath, 'utf8');
+        const jsonData = JSON.parse(rawData);
+        const connectCode = jsonData.connectCode;
+
+        console.log('Connect Code:', connectCode);
+        return connectCode;
+    } catch (err) {
+        console.error('Failed to read connect code:', err);
+        return null;
+    }
+}
+
+let userConnectCode = getConnectCode();
+
 // capitalizes words, changes underscores to spaces
 function formatName(input) {
     return input
@@ -66,7 +105,7 @@ function formatName(input) {
 }
 
 // doesnt always do what's intended by only showing live games
-function getLatestReplayFile() {
+/*function getLatestReplayFile() {
     const files = fs
         .readdirSync(REPLAYS_DIR)
         .filter((f) => f.endsWith(".slp"))
@@ -77,6 +116,26 @@ function getLatestReplayFile() {
         .sort((a, b) => b.time - a.time);
 
     return files.length > 0 ? path.join(REPLAYS_DIR, files[0].name) : null;
+}*/
+// attempt at getting only active slippi files
+function getLatestReplayFile() {
+    const files = fs
+        .readdirSync(REPLAYS_DIR)
+        .filter((f) => f.endsWith(".slp"))
+        .map((f) => ({
+            name: f,
+            time: fs.statSync(path.join(REPLAYS_DIR, f)).mtimeMs,
+        }))
+        .sort((a, b) => b.time - a.time);
+
+    const now = Date.now();
+
+    if (files.length === 0) return null;
+
+    const latest = files[0];
+    const ageMs = now - latest.time;
+
+    return ageMs <= 10000 ? path.join(REPLAYS_DIR, latest.name) : null;
 }
 
 function getCharacterAssetKey(characterName) {
@@ -85,71 +144,85 @@ function getCharacterAssetKey(characterName) {
 }
 
 function updatePresence(game) {
+
     const settings = game.getSettings();
-    const metadata = game.getMetadata();
+    // const metadata = game.getMetadata();
     const frame = game.getLatestFrame();
 
     if (!settings || !frame) return;
 
-    try {
-        // 0 is human, 1 is ai
-        const players = settings.players; 
-		
-		// the code commented below was used in the past to only get human players
-		//settings.players.filter((p) => p.type === 0);
+    // 0 is human, 1 is ai
+    const players = settings.players;
 
-        const player = players[0];
-        const opponent = players[1];
+    // the code commented below was used in the past to only get human players
+    //settings.players.filter((p) => p.type === 0);
 
-        //console.log(`PlYou: ${player.characterId} | PlOpp: ${opponent.characterId}`);
+    //const player = players[0];
+    //const opponent = players[1];
 
-        const playerStocks = frame.players[player.playerIndex].post?.stocksRemaining ?? "?";
-        const oppStocks = frame.players[opponent.playerIndex].post?.stocksRemaining ?? "?";
+    //console.log(`${userConnectCode}`);
+    //console.log("Player types:", settings.players.map(p => p.connectCode));
 
-        // console.log("Player types:", frame.players.map(p => p.post.stocksRemaining));
-        // console.log(`You: ${playerStocks} | Opp: ${oppStocks}`);
+    const player = players.find(p => p.connectCode === userConnectCode) ?? players[0];
+    const opponent = players.find(p => p !== player) ?? players[1];
 
-        const youCharacter = frame.players[player.playerIndex].post.internalCharacterId;
-        const opponentCharacter = frame.players[opponent.playerIndex].post.internalCharacterId;
+    //console.log(`PlYou: ${player.characterId} | PlOpp: ${opponent.characterId}`);
 
-        // convert and use assets
-        const youCharacterName = characterIdToName[youCharacter];
-        const oppCharacterName = characterIdToName[opponentCharacter];
-        const youCharacterAsset = getCharacterAssetKey(youCharacterName);
+    const playerStocks = frame.players[player.playerIndex].post?.stocksRemaining ?? "?";
+    const oppStocks = frame.players[opponent.playerIndex].post?.stocksRemaining ?? "?";
 
-        // shows opponent as character name instead of their username
-        const youName = players[player.playerIndex]?.displayName ?? formatName(youCharacterName);
-        const opponentName = players[opponent.playerIndex]?.displayName ?? formatName(oppCharacterName);
+    // console.log("Player types:", frame.players.map(p => p.post.stocksRemaining));
+    // console.log(`You: ${playerStocks} | Opp: ${oppStocks}`);
 
-        //console.log(`opponentCharacter: ${characterIdToName[opponentCharacter]}`);
-        //console.log(`you: ${characterIdToName[youCharacter]}`);
+    const youCharacter = frame.players[player.playerIndex].post.internalCharacterId;
+    const opponentCharacter = frame.players[opponent.playerIndex].post.internalCharacterId;
 
-        rpc.setActivity({
-            details: `vs ${opponentName} (${formatName(oppCharacterName)})`,
-            state: `${youName}: ${playerStocks} stock(s) | ${opponentName}: ${oppStocks} stock(s)`,
-            largeImageKey: "ssbm",
-            largeImageText: "NTSC v1.02",
-            smallImageKey: youCharacterAsset,
-            smallImageText: `Playing as ${formatName(youCharacterName)}`,
-            instance: false,
-        });
-    }
-    catch {
-        console.log('No active game.');
-    }
+    // convert and use assets
+    const youCharacterName = characterIdToName[youCharacter];
+    const oppCharacterName = characterIdToName[opponentCharacter];
+    const youCharacterAsset = getCharacterAssetKey(youCharacterName);
+
+    // shows opponent as character name instead of their username
+    const youName = players[player.playerIndex]?.displayName ?? formatName(youCharacterName);
+    const opponentName = players[opponent.playerIndex]?.displayName ?? formatName(oppCharacterName);
+
+    //console.log(`opponentCharacter: ${characterIdToName[opponentCharacter]}`);
+    //console.log(`you: ${characterIdToName[youCharacter]}`);
+
+    rpc.setActivity({
+        details: `vs ${opponentName} (${formatName(oppCharacterName)})`,
+        state: `${youName}: ${playerStocks} stock(s) | ${opponentName}: ${oppStocks} stock(s)`,
+        largeImageKey: "ssbm",
+        largeImageText: "NTSC v1.02",
+        smallImageKey: youCharacterAsset,
+        smallImageText: `Playing as ${formatName(youCharacterName)}`,
+        instance: false,
+    });
 }
 
 // recursively call each second (POLL_INVERVAL) and find replays/update RPC
 function startPolling() {
     setInterval(() => {
         const latest = getLatestReplayFile();
+
+        
+        if (!currentReplayPath) {
+            rpc.setActivity({
+                details: `No active game`,
+                largeImageKey: "ssbm",
+                largeImageText: "NTSC v1.02",
+                instance: false,
+            });
+        }
+        
+
         if (!latest || latest === currentReplayPath) {
             if (currentGame) updatePresence(currentGame);
             return;
         }
 
-        console.log("New replay detected:", latest);
         currentReplayPath = latest;
+        console.log("New replay detected:", latest);
         currentGame = new SlippiGame(currentReplayPath, { processOnTheFly: true });
     }, POLL_INTERVAL);
 }
