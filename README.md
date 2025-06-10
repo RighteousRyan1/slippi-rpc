@@ -9,6 +9,7 @@ Then, run the following in the directory you install source to:
 
 ```
 npm install @slippi/slippi-js
+npm install discord-rpc
 ```
 
 To run `rpc.js`, just type `node rpc` in your console to run the script.
